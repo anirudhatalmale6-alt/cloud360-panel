@@ -4,12 +4,22 @@ import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { VM, VMAction } from '@/types';
 import LoginPage from '@/components/LoginPage';
-import Sidebar from '@/components/Sidebar';
+import Sidebar, { ViewType } from '@/components/Sidebar';
 import NodeOverview from '@/components/NodeOverview';
 import VMCard from '@/components/VMCard';
 import VMDetailModal from '@/components/VMDetailModal';
+import MonitoringView from '@/components/MonitoringView';
+import BackupsView from '@/components/BackupsView';
+import SecurityView from '@/components/SecurityView';
 
 const SSHTerminal = dynamic(() => import('@/components/SSHTerminal'), { ssr: false });
+
+const viewTitles: Record<ViewType, { title: string; subtitle: string }> = {
+  dashboard: { title: 'Dashboard', subtitle: 'Real-time infrastructure overview' },
+  monitoring: { title: 'Monitoring', subtitle: 'Historical resource usage' },
+  backups: { title: 'Backups', subtitle: 'Backup status and history' },
+  security: { title: 'Security', subtitle: 'Firewall and access overview' },
+};
 
 export default function Dashboard() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -30,6 +40,7 @@ export default function Dashboard() {
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sshVM, setSSHVM] = useState<VM | null>(null);
+  const [activeView, setActiveView] = useState<ViewType>('dashboard');
 
   useEffect(() => {
     const session = document.cookie.includes('cloud360_session');
@@ -104,12 +115,15 @@ export default function Dashboard() {
 
   const runningCount = vms.filter(v => v.status === 'running').length;
   const stoppedCount = vms.filter(v => v.status === 'stopped').length;
+  const { title, subtitle } = viewTitles[activeView];
 
   return (
     <div className="min-h-screen flex">
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        activeView={activeView}
+        onViewChange={setActiveView}
         filter={filter}
         onFilterChange={setFilter}
         runningCount={runningCount}
@@ -120,22 +134,24 @@ export default function Dashboard() {
         <header className="sticky top-0 z-10 bg-[#0d1117]/80 backdrop-blur-md border-b border-[#30363d] px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-bold text-[#f0f6fc]">Dashboard</h1>
-              <p className="text-sm text-[#8b949e]">Real-time infrastructure overview</p>
+              <h1 className="text-xl font-bold text-[#f0f6fc]">{title}</h1>
+              <p className="text-sm text-[#8b949e]">{subtitle}</p>
             </div>
             <div className="flex items-center gap-4">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search VMs..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="bg-[#161b22] border border-[#30363d] rounded-lg px-4 py-2 pl-10 text-sm text-[#c9d1d9] placeholder-[#484f58] focus:outline-none focus:border-[#58a6ff] w-64 transition-colors"
-                />
-                <svg className="absolute left-3 top-2.5 w-4 h-4 text-[#484f58]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
+              {activeView === 'dashboard' && (
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Search VMs..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="bg-[#161b22] border border-[#30363d] rounded-lg px-4 py-2 pl-10 text-sm text-[#c9d1d9] placeholder-[#484f58] focus:outline-none focus:border-[#58a6ff] w-64 transition-colors"
+                  />
+                  <svg className="absolute left-3 top-2.5 w-4 h-4 text-[#484f58]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-sm text-[#8b949e]">
                 <div className="w-2 h-2 rounded-full bg-[#3fb950] pulse-green" />
                 Live
@@ -144,38 +160,45 @@ export default function Dashboard() {
           </div>
         </header>
         <div className="p-6">
-          {nodeStatus && <NodeOverview node={nodeStatus} />}
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <div className="w-10 h-10 border-2 border-[#58a6ff] border-t-transparent rounded-full spin-slow" />
-            </div>
-          ) : (
+          {activeView === 'dashboard' && (
             <>
-              <div className="flex items-center justify-between mb-4 mt-6">
-                <h2 className="text-lg font-semibold text-[#f0f6fc]">
-                  Virtual Machines
-                  <span className="text-sm font-normal text-[#8b949e] ml-2">({filteredVMs.length})</span>
-                </h2>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {filteredVMs.map(vm => (
-                  <VMCard
-                    key={vm.vmid}
-                    vm={vm}
-                    onAction={handleVMAction}
-                    onSelect={() => setSelectedVM(vm)}
-                    actionLoading={actionLoading === vm.vmid}
-                  />
-                ))}
-              </div>
-              {filteredVMs.length === 0 && (
-                <div className="text-center py-16 text-[#8b949e]">
-                  <p className="text-lg">No VMs found</p>
-                  <p className="text-sm mt-1">Try changing the filter or search query</p>
+              {nodeStatus && <NodeOverview node={nodeStatus} />}
+              {loading ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="w-10 h-10 border-2 border-[#58a6ff] border-t-transparent rounded-full spin-slow" />
                 </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-4 mt-6">
+                    <h2 className="text-lg font-semibold text-[#f0f6fc]">
+                      Virtual Machines
+                      <span className="text-sm font-normal text-[#8b949e] ml-2">({filteredVMs.length})</span>
+                    </h2>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    {filteredVMs.map(vm => (
+                      <VMCard
+                        key={vm.vmid}
+                        vm={vm}
+                        onAction={handleVMAction}
+                        onSelect={() => setSelectedVM(vm)}
+                        actionLoading={actionLoading === vm.vmid}
+                      />
+                    ))}
+                  </div>
+                  {filteredVMs.length === 0 && (
+                    <div className="text-center py-16 text-[#8b949e]">
+                      <p className="text-lg">No VMs found</p>
+                      <p className="text-sm mt-1">Try changing the filter or search query</p>
+                    </div>
+                  )}
+                </>
               )}
             </>
           )}
+          {activeView === 'monitoring' && <MonitoringView vms={vms} />}
+          {activeView === 'backups' && <BackupsView />}
+          {activeView === 'security' && <SecurityView />}
         </div>
       </main>
       {selectedVM && (
