@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { VM, VMAction } from '@/types';
 import LoginPage from '@/components/LoginPage';
@@ -45,6 +45,8 @@ export default function Dashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sshVM, setSSHVM] = useState<VM | null>(null);
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
+  const [wsConnected, setWsConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     const session = document.cookie.includes('cloud360_session');
@@ -67,11 +69,61 @@ export default function Dashboard() {
     }
   }, []);
 
+  // WebSocket live updates with HTTP polling fallback
   useEffect(() => {
     if (!authenticated) return;
+
+    // Initial HTTP fetch
     fetchData();
-    const interval = setInterval(fetchData, 10000);
-    return () => clearInterval(interval);
+
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    function connectWS() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${window.location.host}/api/live`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        // Clear fallback polling when WS is connected
+        if (fallbackInterval) { clearInterval(fallbackInterval); fallbackInterval = null; }
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'update') {
+            if (msg.vms) setVMs(msg.vms);
+            if (msg.node) setNodeStatus(prev => prev ? { ...prev, ...msg.node } : prev);
+            setLoading(false);
+          }
+        } catch { /* ignore parse errors */ }
+      };
+
+      ws.onclose = () => {
+        setWsConnected(false);
+        wsRef.current = null;
+        // Fall back to HTTP polling
+        if (!fallbackInterval) {
+          fallbackInterval = setInterval(fetchData, 10000);
+        }
+        // Try to reconnect after 5s
+        reconnectTimeout = setTimeout(connectWS, 5000);
+      };
+
+      ws.onerror = () => {
+        ws.close();
+      };
+    }
+
+    connectWS();
+
+    return () => {
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+      if (fallbackInterval) clearInterval(fallbackInterval);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    };
   }, [authenticated, fetchData]);
 
   const handleVMAction = async (vmid: number, action: VMAction) => {
@@ -156,9 +208,9 @@ export default function Dashboard() {
                   </svg>
                 </div>
               )}
-              <div className="flex items-center gap-2 text-sm text-[#8b949e]">
-                <div className="w-2 h-2 rounded-full bg-[#3fb950] pulse-green" />
-                Live
+              <div className="flex items-center gap-2 text-sm text-[#8b949e]" title={wsConnected ? 'WebSocket connected — real-time updates' : 'Polling every 10s'}>
+                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-[#3fb950] pulse-green' : 'bg-[#d29922]'}`} />
+                {wsConnected ? 'Live' : 'Polling'}
               </div>
             </div>
           </div>

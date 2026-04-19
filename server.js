@@ -41,20 +41,101 @@ function parseCookies(cookieHeader) {
   return cookies;
 }
 
+// Proxmox API config (for live updates)
+const PROXMOX_HOST = process.env.PROXMOX_HOST || 'https://198.72.127.233:8006';
+const PROXMOX_TOKEN_ID = process.env.PROXMOX_TOKEN_ID || '';
+const PROXMOX_TOKEN_SECRET = process.env.PROXMOX_TOKEN_SECRET || '';
+const PROXMOX_NODE = process.env.PROXMOX_NODE || 'basecanada';
+
+async function fetchProxmox(path) {
+  const res = await fetch(`${PROXMOX_HOST}${path}`, {
+    headers: { Authorization: `PVEAPIToken=${PROXMOX_TOKEN_ID}=${PROXMOX_TOKEN_SECRET}` },
+    cache: 'no-store',
+  });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json.data;
+}
+
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     handle(req, res, parse(req.url, true));
   });
 
-  const wss = new WebSocketServer({ noServer: true });
+  const terminalWss = new WebSocketServer({ noServer: true });
+  const liveWss = new WebSocketServer({ noServer: true });
+
+  // Live data broadcasting
+  const liveClients = new Set();
+  let lastBroadcast = null;
+
+  async function broadcastLiveData() {
+    if (liveClients.size === 0) return;
+    try {
+      const [qemu, lxc, nodeStatus] = await Promise.all([
+        fetchProxmox(`/api2/json/nodes/${PROXMOX_NODE}/qemu`),
+        fetchProxmox(`/api2/json/nodes/${PROXMOX_NODE}/lxc`),
+        fetchProxmox(`/api2/json/nodes/${PROXMOX_NODE}/status`),
+      ]);
+
+      const vms = [...(qemu || []), ...(lxc || [])].map(vm => ({
+        vmid: vm.vmid,
+        name: vm.name || `VM ${vm.vmid}`,
+        status: vm.status,
+        type: vm.type || (vm.cpus !== undefined ? 'qemu' : 'lxc'),
+        cpu: vm.cpu || 0,
+        maxcpu: vm.maxcpu || 1,
+        mem: vm.mem || 0,
+        maxmem: vm.maxmem || 0,
+        disk: vm.disk || 0,
+        maxdisk: vm.maxdisk || 0,
+        uptime: vm.uptime || 0,
+        netin: vm.netin || 0,
+        netout: vm.netout || 0,
+      }));
+
+      let node = null;
+      if (nodeStatus) {
+        const cpu = nodeStatus.cpuinfo || {};
+        const mem = nodeStatus.memory || {};
+        const rootfs = nodeStatus.rootfs || {};
+        node = {
+          cpu: { usage: (nodeStatus.cpu || 0) * 100, cores: cpu.cores || 0 },
+          memory: { used: mem.used || 0, total: mem.total || 0, percentage: mem.total ? ((mem.used / mem.total) * 100) : 0 },
+          uptime: nodeStatus.uptime || 0,
+        };
+      }
+
+      const payload = JSON.stringify({ type: 'update', vms, node, timestamp: Date.now() });
+
+      // Only broadcast if data changed
+      if (payload !== lastBroadcast) {
+        lastBroadcast = payload;
+        for (const client of liveClients) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(payload);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Live broadcast error:', err.message);
+    }
+  }
+
+  // Poll every 5 seconds
+  setInterval(broadcastLiveData, 5000);
+
+  liveWss.on('connection', (ws) => {
+    liveClients.add(ws);
+    // Send last known state immediately
+    if (lastBroadcast) ws.send(lastBroadcast);
+
+    ws.on('close', () => liveClients.delete(ws));
+    ws.on('error', () => liveClients.delete(ws));
+  });
 
   server.on('upgrade', (req, socket, head) => {
-    const { pathname, query } = parse(req.url, true);
-
-    if (pathname !== '/api/terminal') {
-      socket.destroy();
-      return;
-    }
+    const { pathname } = parse(req.url, true);
 
     // Check auth cookie
     const cookies = parseCookies(req.headers.cookie);
@@ -64,12 +145,24 @@ app.prepare().then(() => {
       return;
     }
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit('connection', ws, req);
-    });
+    if (pathname === '/api/live') {
+      liveWss.handleUpgrade(req, socket, head, (ws) => {
+        liveWss.emit('connection', ws, req);
+      });
+      return;
+    }
+
+    if (pathname === '/api/terminal') {
+      terminalWss.handleUpgrade(req, socket, head, (ws) => {
+        terminalWss.emit('connection', ws, req);
+      });
+      return;
+    }
+
+    socket.destroy();
   });
 
-  wss.on('connection', (ws, req) => {
+  terminalWss.on('connection', (ws, req) => {
     const { query } = parse(req.url, true);
     const vmid = parseInt(query.vmid, 10);
     const ip = vmIpMap[vmid];
