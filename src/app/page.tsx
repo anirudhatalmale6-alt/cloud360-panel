@@ -11,6 +11,7 @@ import VMDetailModal from '@/components/VMDetailModal';
 import MonitoringView from '@/components/MonitoringView';
 import BackupsView from '@/components/BackupsView';
 import SecurityView from '@/components/SecurityView';
+import FileManagerView from '@/components/FileManagerView';
 
 const SSHTerminal = dynamic(() => import('@/components/SSHTerminal'), { ssr: false });
 
@@ -19,6 +20,7 @@ const viewTitles: Record<ViewType, { title: string; subtitle: string }> = {
   monitoring: { title: 'Monitoring', subtitle: 'Historical resource usage' },
   backups: { title: 'Backups', subtitle: 'Backup status and history' },
   security: { title: 'Security', subtitle: 'Firewall and access overview' },
+  files: { title: 'File Manager', subtitle: 'Browse VM file systems' },
 };
 
 export default function Dashboard() {
@@ -199,6 +201,7 @@ export default function Dashboard() {
           {activeView === 'monitoring' && <MonitoringView vms={vms} />}
           {activeView === 'backups' && <BackupsView />}
           {activeView === 'security' && <SecurityView />}
+          {activeView === 'files' && <FileManagerView vms={vms} />}
         </div>
       </main>
       {selectedVM && (
