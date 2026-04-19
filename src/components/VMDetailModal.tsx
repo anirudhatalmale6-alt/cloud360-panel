@@ -22,26 +22,17 @@ function formatUptime(seconds: number): string {
   return parts.join(', ') || '< 1 min';
 }
 
-// VM name to IP mapping
-const vmIpMap: Record<number, string> = {
-  101: '10.10.10.18', 102: '10.10.10.230', 103: '10.10.10.17',
-  106: '10.10.10.15', 107: '10.10.10.16', 108: '198.72.127.240',
-  111: '10.10.10.19', 112: '10.10.10.23', 114: '10.10.10.31',
-  115: '10.10.10.41', 116: '10.10.10.42', 117: '10.10.10.43',
-  118: '10.10.10.44', 119: '10.10.10.51', 120: '10.10.10.32',
-  121: '10.10.10.33', 122: '10.10.10.22', 124: '10.10.10.71',
-  125: '10.10.10.35', 130: '10.10.10.51', 131: '10.10.10.53',
-  200: '10.10.10.200', 201: '10.10.10.201',
-};
+import { vmIpMap } from '@/lib/vm-ips';
 
 interface VMDetailModalProps {
   vm: VM;
   onClose: () => void;
   onAction: (vmid: number, action: VMAction) => void;
+  onSSH?: (vm: VM) => void;
   actionLoading: boolean;
 }
 
-export default function VMDetailModal({ vm, onClose, onAction, actionLoading }: VMDetailModalProps) {
+export default function VMDetailModal({ vm, onClose, onAction, onSSH, actionLoading }: VMDetailModalProps) {
   const isRunning = vm.status === 'running';
   const cpuPercent = vm.cpu * 100;
   const memPercent = vm.maxmem > 0 ? (vm.mem / vm.maxmem) * 100 : 0;
@@ -152,6 +143,21 @@ export default function VMDetailModal({ vm, onClose, onAction, actionLoading }: 
             <p className="text-sm text-[#f0f6fc]">{formatBytes(vm.maxdisk)}</p>
           </div>
         </div>
+
+        {/* SSH Terminal */}
+        {isRunning && onSSH && (
+          <div className="px-6">
+            <button
+              onClick={() => onSSH(vm)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-[#0d1117] border border-[#58a6ff] text-[#58a6ff] hover:bg-[#58a6ff15] font-medium transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              Open SSH Terminal
+            </button>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="p-6 border-t border-[#21262d] flex gap-3">

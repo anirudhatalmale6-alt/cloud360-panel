@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { VM, VMAction } from '@/types';
 import LoginPage from '@/components/LoginPage';
 import Sidebar from '@/components/Sidebar';
 import NodeOverview from '@/components/NodeOverview';
 import VMCard from '@/components/VMCard';
 import VMDetailModal from '@/components/VMDetailModal';
+
+const SSHTerminal = dynamic(() => import('@/components/SSHTerminal'), { ssr: false });
 
 export default function Dashboard() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -26,6 +29,7 @@ export default function Dashboard() {
   const [selectedVM, setSelectedVM] = useState<VM | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sshVM, setSSHVM] = useState<VM | null>(null);
 
   useEffect(() => {
     const session = document.cookie.includes('cloud360_session');
@@ -179,8 +183,12 @@ export default function Dashboard() {
           vm={selectedVM}
           onClose={() => setSelectedVM(null)}
           onAction={handleVMAction}
+          onSSH={(vm) => { setSSHVM(vm); setSelectedVM(null); }}
           actionLoading={actionLoading === selectedVM.vmid}
         />
+      )}
+      {sshVM && (
+        <SSHTerminal vm={sshVM} onClose={() => setSSHVM(null)} />
       )}
     </div>
   );
